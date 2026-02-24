@@ -1,0 +1,65 @@
+name: Deploy to Azure Container Registry
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/**'
+      - '.github/workflows/deploy-to-acr.yml'
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: read
+      id-token: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Create .env file from secret
+        working-directory: src
+        run: |
+          echo "${{ secrets.ENV }}" > .env
+          # Verify .env was created
+          if [ ! -f .env ]; then
+            echo "Error: .env file was not created"
+            exit 1
+          fi
+          echo "✅ .env file created successfully"
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      
+      - name: Login to Azure Container Registry
+        run: |
+          az acr login --name ${{ secrets.ACR_REGISTRY_NAME }}
+      
+      - name: Build and push Docker image
+        working-directory: src
+        run: |
+          IMAGE_TAG="${{ secrets.ACR_REGISTRY_NAME }}.azurecr.io/${{ secrets.ACR_IMAGE_NAME }}:${{ github.sha }}"
+          IMAGE_LATEST="${{ secrets.ACR_REGISTRY_NAME }}.azurecr.io/${{ secrets.ACR_IMAGE_NAME }}:latest"
+          
+          docker build -t $IMAGE_TAG -t $IMAGE_LATEST .
+          docker push $IMAGE_TAG
+          docker push $IMAGE_LATEST
+          
+          echo "✅ Image pushed successfully"
+          echo "   - $IMAGE_TAG"
+          echo "   - $IMAGE_LATEST"
+      
+      - name: Clean up sensitive files
+        working-directory: src
+        if: always()
+        run: |
+          rm -f .env
+          echo "✅ Cleaned up .env file"
